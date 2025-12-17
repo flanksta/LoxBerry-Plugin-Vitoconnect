@@ -263,7 +263,7 @@ function Viessmann_summary( $login ){
 	$Modellinfo -> CU401B_A = "Vitocal xxx-A mit Vitotronic 200 (Typ WO1C)";
 	
 	
-	$modelInstallationJson = Viessmann_GetData ( apiURLv2_base."equipment/installations?includeGateways=true");
+	$modelInstallationJson = Viessmann_GetData ( apiURLv2."equipment/installations?includeGateways=true");
 	if (is_null($modelInstallationJson)) {
 		LOGERR("Unable to get modell installation - exiting");
 		Viessmann_Publish($Install->general);	//Publish General Information to get aggregatedstatus->error when it is not possible to get instalation details. Before no change on MQTT or HTTP when Gateway was offline.
@@ -309,7 +309,7 @@ function Viessmann_summary( $login ){
 	LOGDEB("Get DeviceData from Viessmann API Service.");
 	
 	// deprecated endpoint of v1 from 2025-11-17 https://api.viessmann-climatesolutions.com/documentation/static/changelog-2025
-	$installationDetailJson = Viessmann_GetData (apiURLv2_base."features/installations/".$Install->general->id."/gateways/".$Install->general->serial."/devices/0/features/" );
+	$installationDetailJson = Viessmann_GetData (apiURLv2."features/installations/".$Install->general->id."/gateways/".$Install->general->serial."/devices/0/features/" );
 	if (is_null($installationDetailJson)) {
 		LOGERR("Unable to get installation details -exiting");
 		exit(1);
@@ -566,7 +566,7 @@ function Viessmann_SetData( $Parameter, $Value, $apiversion ){
 	global $operatingModeIntStr;
 	
 	
-	$installationJson = Viessmann_GetData ( apiURLv2_base."equipment/installations?includeGateways=true");
+	$installationJson = Viessmann_GetData ( apiURLv2."equipment/installations?includeGateways=true");
 	if (is_null($installationJson)) {
 		LOGERR("Unable to get installation data, unable to proceed setting data");
 		exit(1);
@@ -579,7 +579,7 @@ function Viessmann_SetData( $Parameter, $Value, $apiversion ){
 	$serial = $installationJsonDecode['data'][0]['gateways'][0]['serial'];	
 	
 
-	$url =(apiURLv2_base."features/installations/".$id."/gateways/".$serial."/devices/0/features/");
+	$url =(apiURLv2."features/installations/".$id."/gateways/".$serial."/devices/0/features/");
 	
 	LOGINF("Set Param: ".$Parameter." to Value: ".$Value);
 	
