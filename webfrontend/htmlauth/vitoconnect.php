@@ -38,6 +38,17 @@ $operatingModeStrInt = [
 
 $operatingModeIntStr = array_flip($operatingModeStrInt);
 
+// Ventilation Operating Mode:
+$VentilatiOnoperatingModeStrInt = [
+	"standby" => 1,
+	"standard" => 2,
+	"ventilation" => 3,
+	"undefined" => 9
+];
+
+$VentilatiOnoperatingModeStrInt = array_flip($VentilatiOnoperatingModeStrInt);
+
+
 
 // Create and start log
 // Shutdown function
@@ -50,6 +61,13 @@ function shutdown()
 	if(isset($log)) {
 		LOGEND("Processing finished");
 	}
+}
+
+// function to check if string is valid json array
+// for PHP version <8.3 otherwise use json_validate
+function isJson($str) {
+    $json = json_decode($str);
+    return $json !== false && !is_null($json) && $str != $json;
 }
 
 $log = LBLog::newLog( [ "name" => "Vitoconnect", "stderr" => 1 ] );
@@ -225,7 +243,6 @@ LOGERR("Don't know what to do (action '$action'). Exiting.");
 exit(1);
 
 
-
 function Viessmann_summary( $login ){
 	global $operatingModeStrInt;
 			
@@ -246,9 +263,7 @@ function Viessmann_summary( $login ){
 	$Modellinfo -> CU401B_A = "Vitocal xxx-A mit Vitotronic 200 (Typ WO1C)";
 	
 	
-	//$installationJson = Viessmann_GetData ( apiURLBase."gateways");
-
-	$modelInstallationJson = Viessmann_GetData ( apiURL."installations?includeGateways=true");
+	$modelInstallationJson = Viessmann_GetData ( apiURLv2_base."equipment/installations?includeGateways=true");
 	if (is_null($modelInstallationJson)) {
 		LOGERR("Unable to get modell installation - exiting");
 		Viessmann_Publish($Install->general);	//Publish General Information to get aggregatedstatus->error when it is not possible to get instalation details. Before no change on MQTT or HTTP when Gateway was offline.
@@ -294,7 +309,7 @@ function Viessmann_summary( $login ){
 	LOGDEB("Get DeviceData from Viessmann API Service.");
 	
 	// deprecated endpoint of v1 from 2025-11-17 https://api.viessmann-climatesolutions.com/documentation/static/changelog-2025
-	$installationDetailJson = Viessmann_GetData (apiURLv2."installations/".$Install->general->id."/gateways/".$Install->general->serial."/devices/0/features/" );
+	$installationDetailJson = Viessmann_GetData (apiURLv2_base."features/installations/".$Install->general->id."/gateways/".$Install->general->serial."/devices/0/features/" );
 	if (is_null($installationDetailJson)) {
 		LOGERR("Unable to get installation details -exiting");
 		exit(1);
@@ -333,18 +348,23 @@ function Viessmann_summary( $login ){
 								if(empty($subval)){
 										$value->value[$subkey] = [["errorCode"=>"F00","timestamp"=>date("c",time()),"accessLevel"=>"customer","priority"=>"Info"]];
 								}
-							}
-							
+							}							
 						}
 						
-						$Value= json_encode($value->value);
+						$Value = json_encode($value->value);
 						break;
 						
 					case "array":
+						//if (isJson($Value) == true) {
+						//if (json_validate($Value) == true) {
+							$Value = json_encode($value->value);	
+							$Value = str_replace(",",";",$Value);
+							break;
+						//}						
 						if (!is_scalar($value->value)) {
 							break;
 						}
-						$Value= join(";",$value->value);						
+						$Value = join(";",$value->value);						
 						break;
 						
 					case "boolean":
@@ -353,7 +373,7 @@ function Viessmann_summary( $login ){
 						break;
 						
 					case "string":
-						$Value= $value->value;
+						$Value = $value->value;
 						//map operating modes to int
 						if (strEndsWith($Key, 'operating.modes.active.value')) {
 							$Int_value = $operatingModeStrInt[$Value];
@@ -546,7 +566,7 @@ function Viessmann_SetData( $Parameter, $Value, $apiversion ){
 	global $operatingModeIntStr;
 	
 	
-	$installationJson = Viessmann_GetData ( apiURL."installations?includeGateways=true");
+	$installationJson = Viessmann_GetData ( apiURLv2_base."equipment/installations?includeGateways=true");
 	if (is_null($installationJson)) {
 		LOGERR("Unable to get installation data, unable to proceed setting data");
 		exit(1);
@@ -558,10 +578,8 @@ function Viessmann_SetData( $Parameter, $Value, $apiversion ){
 	$id = $installationJsonDecode['data'][0]['gateways'][0]['installationId'];
 	$serial = $installationJsonDecode['data'][0]['gateways'][0]['serial'];	
 	
-	$url =(apiURL."installations/".$id."/gateways/".$serial."/devices/0/features/" );
-	if ($apiversion == "v2") {
-		$url =(apiURLv2."installations/".$id."/gateways/".$serial."/devices/0/features/");
-	}	
+
+	$url =(apiURLv2_base."features/installations/".$id."/gateways/".$serial."/devices/0/features/");
 	
 	LOGINF("Set Param: ".$Parameter." to Value: ".$Value);
 	
@@ -785,7 +803,42 @@ function Viessmann_SetData( $Parameter, $Value, $apiversion ){
 			$url = $url."heating.operating.programs.holiday/commands/unschedule";
 			$PostData = "{}";
 			break;
-			
+		case "ventilation.operating.modes.active.enum":
+			if ((int)$Value == 0) {
+				LOGINF("Ignoring 0 value - Loxone sends this sometimes as no choice");
+				return;	
+			}
+			$Str_value = isset($VentilatiOnoperatingModeStrInt[(int)$Value]) ? $VentilatiOnoperatingModeStrInt[(int)$Value] : "";
+			$Parameter = substr($Parameter, 0, -5);//remove .enum at the end
+			if (empty($Str_value) || $Str_value == "undefined") {
+				LOGERR("Illegal enum value " . $Value );
+				return null;
+			}
+			$url = $url.$Parameter."/commands/setMode";
+			$PostData = "{\"mode\":\"".$Str_value."\"}";
+			break;	
+		case "ventilation.quickmodes.comfort":
+			if($Value == "activate"){
+				$url = $url.$Parameter."/commands/activate";
+			}
+			if($Value == "deactivate"){
+				$url = $url.$Parameter."/commands/deactivate";
+			}
+			$PostData = "{}";
+			break;		
+		case "ventilation.quickmodes.eco":
+			if($Value == "activate"){
+				$url = $url.$Parameter."/commands/activate";
+			}
+			if($Value == "deactivate"){
+				$url = $url.$Parameter."/commands/deactivate";
+			}
+			$PostData = "{}";
+			break;	
+		case "ventilation.schedule.resetSchedule":
+			$url = $url."ventilation.schedule/commands/resetSchedule";
+			$PostData = "{}";
+			break;				
 		default: 
 			LOGERR("Action '" . $Parameter . "' not supported. Exiting.");
 			exit(1);
